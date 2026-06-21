@@ -27,7 +27,7 @@ const TRANSITIONS: Transition[] = [
   { from: DeviceStatus.ON, to: DeviceStatus.WARNING, action: 'TEMP_WARNING' },
   { from: DeviceStatus.WARNING, to: DeviceStatus.ON, action: 'TEMP_NORMAL' },
   { from: [DeviceStatus.WARNING, DeviceStatus.ON], to: DeviceStatus.FAULT, action: 'TEMP_CRITICAL' },
-  { from: [DeviceStatus.ON, DeviceStatus.WARNING, DeviceStatus.STANDBY], to: DeviceStatus.FAULT, action: 'FAULT' },
+  { from: [DeviceStatus.OFF, DeviceStatus.STANDBY, DeviceStatus.ON, DeviceStatus.WARNING], to: DeviceStatus.FAULT, action: 'FAULT' },
   { from: [DeviceStatus.ON, DeviceStatus.WARNING, DeviceStatus.FAULT], to: DeviceStatus.FUSED, action: 'FUSE' },
   { from: [DeviceStatus.OFF, DeviceStatus.BLOCKED], to: DeviceStatus.BLOCKED, action: 'BLOCK' },
   { from: DeviceStatus.BLOCKED, to: DeviceStatus.OFF, action: 'UNBLOCK' },

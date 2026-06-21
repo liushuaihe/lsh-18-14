@@ -27,6 +27,7 @@ export const UPSPanel: React.FC = () => {
   const isLow = healthPct < 50 && !isCritical;
 
   const formatMinutes = (m: number) => {
+    if (powerMode === 'mains') return '∞';
     if (!isFinite(m) || m <= 0) return '0:00';
     const hrs = Math.floor(m / 60);
     const mins = Math.floor(m % 60);
@@ -99,7 +100,9 @@ export const UPSPanel: React.FC = () => {
           <div className={`flex flex-col items-center justify-center ${batteryColor()} ${isCritical && powerMode === 'ups' ? 'animate-blink-led' : ''}`}>
             {batteryIcon()}
             <span className="text-[9px] font-mono mt-1 opacity-70">
-              {upsBattery.charging ? '充电中' : powerMode === 'off' ? '耗尽' : '放电'}
+              {powerMode === 'mains'
+                ? (upsBattery.charging ? '充电中' : '市电待机')
+                : powerMode === 'off' ? '耗尽' : '放电'}
             </span>
           </div>
 
@@ -137,8 +140,14 @@ export const UPSPanel: React.FC = () => {
                 label="续航"
                 value={formatMinutes(upsBattery.remainingMinutes)}
                 unit=""
-                sub={upsBattery.remainingMinutes > 60 ? '' : `≈${Math.ceil(upsBattery.remainingMinutes)}分钟`}
-                color={isCritical ? 'rose' : isLow ? 'amber' : 'emerald'}
+                sub={powerMode === 'mains'
+                  ? '市电供电中'
+                  : (upsBattery.remainingMinutes > 60 ? '' : `≈${Math.ceil(upsBattery.remainingMinutes)}分钟`)
+                }
+                color={powerMode === 'mains'
+                  ? 'cyan'
+                  : (isCritical ? 'rose' : isLow ? 'amber' : 'emerald')
+                }
                 highlight={powerMode === 'ups'}
               />
             </div>

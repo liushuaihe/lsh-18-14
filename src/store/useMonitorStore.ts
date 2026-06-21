@@ -457,26 +457,64 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
     const state = get();
     if (state.powerMode !== 'mains') return;
 
-    const loadKW = getCurrentLoadKW(state.devices);
+    const now = Date.now();
+
+    let newDevices = { ...state.devices };
+    const pwrMain = newDevices['PWR-MAIN'];
+    if (pwrMain) {
+      const faulted = applyTransition(pwrMain, { type: 'FAULT', faultCode: 'MAINS-OUT' });
+      if (faulted) newDevices['PWR-MAIN'] = faulted;
+    }
+
+    let newLog: Array<{ deviceId: string; deviceName: string; priority: number; timestamp: number }> = [];
+    const immediateShutdown = Object.values(newDevices)
+      .filter(d => isDeviceRunning(d.status) && d.shutdownPriority === 5);
+    for (const dev of immediateShutdown) {
+      newDevices[dev.id] = {
+        ...dev,
+        status: DeviceStatus.OFF,
+        lastStatusChange: now,
+      };
+      newLog.push({
+        deviceId: dev.id,
+        deviceName: dev.name,
+        priority: dev.shutdownPriority,
+        timestamp: now,
+      });
+    }
+
+    const loadKW = getCurrentLoadKW(newDevices);
     const battery: UPSBattery = {
       ...state.upsBattery,
       loadKW,
       remainingMinutes: calculateRemainingMinutes({ ...state.upsBattery, loadKW }),
       charging: false,
     };
-    const timeline = buildShutdownTimeline(state.devices, battery);
+
+    const timeline = buildShutdownTimeline(newDevices, battery);
 
     set({
       powerMode: 'ups',
       upsActive: true,
       upsBattery: battery,
+      devices: newDevices,
       shutdownTimeline: timeline,
-      nextShutdownPriority: 5,
-      shutdownLog: [],
+      nextShutdownPriority: 4,
+      shutdownLog: newLog,
     });
 
-    const now = Date.now();
     const newAlerts = [...state.alerts];
+    for (const entry of newLog) {
+      newAlerts.unshift({
+        id: `UPS-SD-${entry.deviceId}-${now}`,
+        timestamp: now,
+        deviceId: entry.deviceId,
+        sensorId: newDevices[entry.deviceId].tempSensorId,
+        level: 'warning',
+        message: `🔻 [${entry.deviceName}] 主电故障 · 立即关停 (优先级 P5)`,
+        acknowledged: false,
+      });
+    }
     newAlerts.unshift({
       id: `UPS-FAIL-${now}`,
       timestamp: now,
@@ -499,10 +537,18 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
       charging: true,
     };
 
+    let newDevices = { ...state.devices };
+    const pwrMain = newDevices['PWR-MAIN'];
+    if (pwrMain && pwrMain.status === DeviceStatus.FAULT) {
+      const reset = applyTransition(pwrMain, { type: 'RESET_FAULT' });
+      if (reset) newDevices['PWR-MAIN'] = reset;
+    }
+
     set({
       powerMode: 'mains',
       upsActive: false,
       upsBattery: battery,
+      devices: newDevices,
       shutdownTimeline: [],
       shutdownLog: [],
       nextShutdownPriority: 5,
@@ -529,23 +575,23 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
     let battery = tickBatteryDrain(state.upsBattery, elapsedSeconds);
     let devices = { ...state.devices };
     let newLog = [...state.shutdownLog];
+    let newAlerts = [...state.alerts];
 
     const currentRemaining = battery.remainingMinutes;
     let nextP = state.nextShutdownPriority;
 
     const priorityThresholds: Record<number, number> = {
-      5: Infinity,
       4: 30,
       3: 15,
       2: 5,
     };
 
     let changed = false;
-    for (let p = nextP; p >= 2; p--) {
-      const threshold = priorityThresholds[p];
+    if (nextP >= 2) {
+      const threshold = priorityThresholds[nextP];
       if (threshold !== undefined && currentRemaining <= threshold) {
         const toShutdown = Object.values(devices)
-          .filter(d => isDeviceRunning(d.status) && d.shutdownPriority === p);
+          .filter(d => isDeviceRunning(d.status) && d.shutdownPriority === nextP);
 
         if (toShutdown.length > 0) {
           const now = Date.now();
@@ -561,8 +607,20 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
               priority: dev.shutdownPriority,
               timestamp: now,
             });
+            newAlerts.unshift({
+              id: `UPS-SD-${dev.id}-${now}`,
+              timestamp: now,
+              deviceId: dev.id,
+              sensorId: dev.tempSensorId,
+              level: 'warning',
+              message: `🔻 [${dev.name}] UPS续航不足 · 按优先级关停 (P${nextP})`,
+              acknowledged: false,
+            });
           }
-          nextP = p - 1;
+          nextP = nextP - 1;
+          changed = true;
+        } else {
+          nextP = nextP - 1;
           changed = true;
         }
       }
@@ -606,6 +664,7 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
           shutdownTimeline: [],
           nextShutdownPriority: 1,
           shutdownLog: newLog,
+          alerts: newAlerts.slice(0, 100),
         });
         return;
       }
@@ -617,6 +676,7 @@ export const useMonitorStore = create<MonitorStore>((set, get) => ({
         shutdownTimeline: timeline,
         nextShutdownPriority: nextP,
         shutdownLog: newLog,
+        alerts: newAlerts.slice(0, 100),
       });
     } else {
       if (battery.currentCapacityKWh <= 0) {
